@@ -124,8 +124,16 @@ def build_sinusoidal_positional_encoding(max_len, d_model):
     pe[:, 1::2] = torch.cos(arguments)
     return pe
 
-# Step 13 - add_positional_encoding_to_embeddings (not yet solved)
-# TODO: implement
+# Step 13 - add_positional_encoding_to_embeddings
+import torch
+
+def add_positional_encoding_to_embeddings(embedded_batch, positional_encoding):
+    # TODO: add the first L rows of positional_encoding to embedded_batch and return the sum.
+
+    batch_size, seq_len, d_model = embedded_batch.shape 
+    pe_sliced = positional_encoding[:seq_len, :]
+
+    return embedded_batch + pe_sliced
 
 # Step 14 - build_padding_mask (not yet solved)
 # TODO: implement
