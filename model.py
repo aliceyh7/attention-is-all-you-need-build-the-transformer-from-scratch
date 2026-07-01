@@ -262,8 +262,16 @@ def transpose_heads_before_sequence(split_tensor):
     split_tensor = split_tensor.transpose(1, 2)
     return split_tensor
 
-# Step 25 - merge_heads_back_to_model_dim (not yet solved)
-# TODO: implement
+# Step 25 - merge_heads_back_to_model_dim
+import torch
+
+def merge_heads_back_to_model_dim(multi_head_tensor):
+    # TODO: merge the head axis back into the feature axis to reconstruct d_model
+    
+    batch, num_heads, seq_len, d_model = multi_head_tensor.size()
+    multi_head_tensor = multi_head_tensor.transpose(2,1)
+    multi_head_tensor = multi_head_tensor.reshape(batch, seq_len, num_heads * d_model)
+    return multi_head_tensor
 
 # Step 26 - apply_linear_projection (not yet solved)
 # TODO: implement
