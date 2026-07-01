@@ -215,35 +215,31 @@ import math
 
 def scaled_dot_product_attention(query, key, value, mask=None):
     """Run scaled dot-product attention; return (context, attention_weights)."""
+    # TODO: chain raw scores, scale by sqrt(d_k), optionally mask, softmax, then mix values
     
-    d_k = query.size(-1)
+    d_model = query.size(-1)
 
-    # 1. Matmul: Q @ K^T
+    # 1. Q @ K^T
     key_T = key.transpose(-2, -1)
     attention_raw = query @ key_T
 
-    # 2. Scale
-    attention_raw = attention_raw / math.sqrt(d_k)
+    #2. Scale
+    attention_raw = attention_raw / math.sqrt(d_model)
 
-    # 3. Pre-Softmax Mask: fill invalid scores with a large negative number
+    #3. Mask
     if mask is not None:
-        attention_raw = attention_raw.masked_fill(mask == False, -1e9)
+        attention_raw = attention_raw.masked_fill(mask ==False, -1e9)
 
-    # 4. Softmax
-    weights = torch.softmax(attention_raw, dim=-1)
-    
-    # 5. Post-Softmax Mask (Safe Softmax): explicitly zero out masked weights 
-    # This prevents fully masked rows from evaluating to uniform distributions (e.g., [0.5, 0.5])
+    #4. Softmax
+    weights = torch.softmax(attention_raw, -1)
+
     if mask is not None:
         weights = weights.masked_fill(mask == False, 0.0)
     
-    # (Optional) Keep nan fallback just in case -inf is ever used instead of -1e9
     weights = torch.nan_to_num(weights, nan=0.0)
     
-    # 6. Mix Values
-    context = weights @ value
-    
-    return context, weights
+    scaled_dot_product = weights @ value
+    return scaled_dot_product, weights
 
 # Step 23 - split_last_dim_into_heads (not yet solved)
 # TODO: implement
