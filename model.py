@@ -135,8 +135,16 @@ def add_positional_encoding_to_embeddings(embedded_batch, positional_encoding):
 
     return embedded_batch + pe_sliced
 
-# Step 14 - build_padding_mask (not yet solved)
-# TODO: implement
+# Step 14 - build_padding_mask
+import torch
+
+def build_padding_mask(token_ids, pad_id):
+    """Return a (B, 1, 1, L) bool mask: True where token_ids != pad_id."""
+    # TODO: build a boolean mask marking non-pad positions, shaped for broadcasting against attention scores
+    
+    mask = (token_ids != pad_id)
+    mask = mask.unsqueeze(1).unsqueeze(2)
+    return mask
 
 # Step 15 - build_causal_mask (not yet solved)
 # TODO: implement
