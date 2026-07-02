@@ -293,9 +293,18 @@ def project_to_query_key_value(x, w_q, b_q, w_k, b_k, w_v, b_v):
     w_k = w_k.t()
     w_v = w_v.t()
 
-    proj_q = x @ w_q + b_q if b_q else 0
-    proj_k = x @ w_k + b_k if b_k else 0
-    proj_v = x @ w_v + b_v if b_v else 0
+    proj_q = x @ w_q
+    if b_q is not None:
+        proj_q += b_q 
+
+    proj_k = x @ w_k
+    if b_k is not None:
+        proj_k += b_k
+
+    proj_v = x @ w_v
+    if b_v is not None:
+        proj_v += b_v
+
     return proj_q, proj_k, proj_v
 
 # Step 28 - split_qkv_into_heads
