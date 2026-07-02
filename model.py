@@ -285,11 +285,31 @@ def apply_linear_projection(x, weight, bias):
 
     return proj
 
-# Step 27 - project_to_query_key_value (not yet solved)
-# TODO: implement
+# Step 27 - project_to_query_key_value
+def project_to_query_key_value(x, w_q, b_q, w_k, b_k, w_v, b_v):
+    # TODO: project x into separate query, key, and value tensors via three linear layers
+    
+    w_q = w_q.t()
+    w_k = w_k.t()
+    w_v = w_v.t()
 
-# Step 28 - split_qkv_into_heads (not yet solved)
-# TODO: implement
+    proj_q = x @ w_q + b_q if b_q else 0
+    proj_k = x @ w_k + b_k if b_k else 0
+    proj_v = x @ w_v + b_v if b_v else 0
+    return proj_q, proj_k, proj_v
+
+# Step 28 - split_qkv_into_heads
+import torch
+
+def split_qkv_into_heads(q, k, v, num_heads):
+    # TODO: split each of q, k, v into (B, num_heads, L, d_k) and return as a tuple
+    
+    b, l, d_model = q.size()
+
+    q = q.reshape(b, l, num_heads, d_model // num_heads).transpose(1,2)
+    k = k.reshape(b, l, num_heads, d_model // num_heads).transpose(1,2)
+    v = v.reshape(b, l, num_heads, d_model // num_heads).transpose(1,2)
+    return q, k, v
 
 # Step 29 - multi_head_scaled_dot_product_attention (not yet solved)
 # TODO: implement
