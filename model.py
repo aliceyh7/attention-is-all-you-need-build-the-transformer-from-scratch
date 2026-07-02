@@ -356,8 +356,41 @@ def merge_heads_and_project_output(context, w_o, b_o):
     merged = merge_heads_back_to_model_dim(context)
     return apply_linear_projection(merged, w_o, b_o)
 
-# Step 31 - assemble_multi_head_attention_forward (not yet solved)
-# TODO: implement
+# Step 31 - assemble_multi_head_attention_forward
+def assemble_multi_head_attention_forward(query, key, value, w_q, w_k, w_v, w_o, num_heads, mask=None):
+    # TODO: project Q/K/V, split into heads, 
+    # run scaled dot-product attention, merge heads, output projection.
+
+    # 1. INPUT PROJECTIONS 
+    query_proj = query @ w_q.t()
+    key_proj = key @ w_k.t() 
+    value_proj = value @ w_v.t()
+
+    # 2. SPLIT INTO HEADS
+    batch_size, seq_len, d_model = query.size()
+    head_dim = d_model // num_heads
+    
+    query_h = query_proj.reshape(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+    key_h = key_proj.reshape(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+    value_h = value_proj.reshape(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+    # 3. SCALED PRODUCT ATTENTION
+    raw_attention = query_h @ key_h.transpose(-2, -1)
+    raw_attention = raw_attention / math.sqrt(head_dim)
+    if mask is not None:
+        raw_attention = raw_attention.masked_fill(mask == False, -float('inf'))
+    weights = torch.softmax(raw_attention, -1)
+    context = weights @ value_h
+
+    # 4. MERGE HEADS
+    # Before: (batch, num_heads, seq_len, head_dim)
+    # After:  (batch, seq_len, num_heads * head_dim) 
+    context = context.transpose(1, 2)
+    merged_heads = context.reshape(batch_size, seq_len, d_model)
+
+    # 5. OUTPUT PROJECTION
+    final_output = merged_heads @ w_o.t()
+    return final_output
 
 # Step 32 - apply_ffn_first_linear_and_relu (not yet solved)
 # TODO: implement
