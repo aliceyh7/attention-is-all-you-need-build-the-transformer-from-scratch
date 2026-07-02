@@ -392,8 +392,12 @@ def assemble_multi_head_attention_forward(query, key, value, w_q, w_k, w_v, w_o,
     final_output = merged_heads @ w_o.t()
     return final_output
 
-# Step 32 - apply_ffn_first_linear_and_relu (not yet solved)
-# TODO: implement
+# Step 32 - apply_ffn_first_linear_and_relu
+import torch.nn.functional as F
+
+def apply_ffn_first_linear_and_relu(x, w1, b1):
+    linear_out = x @ w1 + b1
+    return F.relu(linear_out)
 
 # Step 33 - apply_ffn_second_linear (not yet solved)
 # TODO: implement
