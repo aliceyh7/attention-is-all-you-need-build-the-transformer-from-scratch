@@ -408,8 +408,15 @@ def apply_ffn_second_linear(hidden, w2, b2):
     linear_out = hidden @ w2 + b2
     return linear_out
 
-# Step 34 - position_wise_feed_forward_network (not yet solved)
-# TODO: implement
+# Step 34 - position_wise_feed_forward_network
+import torch.nn.functional as F
+def position_wise_feed_forward_network(x, w1, b1, w2, b2):
+    # TODO: compose the two FFN linears with a ReLU in between, returning shape (B, T, d_model).
+    
+    layer_1 = x @ w1 + b1
+    relu = F.relu(layer_1)
+    layer_2 = relu @ w2 + b2
+    return layer_2
 
 # Step 35 - compute_layer_norm_mean_and_variance (not yet solved)
 # TODO: implement
