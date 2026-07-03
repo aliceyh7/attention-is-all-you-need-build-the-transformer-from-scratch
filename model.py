@@ -517,8 +517,36 @@ def encoder_layer_feed_forward_sublayer(x, w1, b1, w2, b2, gamma, beta):
 
     return gamma * out_layer_norm + beta
 
-# Step 41 - assemble_encoder_layer (not yet solved)
-# TODO: implement
+# Step 41 - assemble_encoder_layer
+def assemble_encoder_layer(x, layer_params, num_heads, src_mask):
+    # TODO: chain the self-attention sublayer and the feed-forward sublayer using layer_params.
+    
+    b, l, d_model = x.size()
+    # 1. Self-Attention Sublayer
+    d_n = d_model // num_heads
+    query = (x @ layer_params['w_q'].t()).reshape(b, l, num_heads, d_n).transpose(1,2)
+    key = (x @ layer_params['w_k'].t()).reshape(b, l, num_heads, d_n).transpose(1,2)
+    value = (x @ layer_params['w_v'].t()).reshape(b, l, num_heads, d_n).transpose(1,2)
+
+    raw_attention = query @ key.transpose(-2, -1)
+    if src_mask is not None:
+        raw_attention = raw_attention.masked_fill(src_mask == False, -float('inf'))
+    value = (x @ layer_params['w_v'].t()).reshape(b, l, num_heads, d_n).transpose(1,2)
+    weights = torch.softmax(raw_attention, dim=-1)
+    context = raw_attention @ value
+
+    merged_head = context.transpose(1, 2).reshape(b, l, d_model)
+    attention_sublayer_output = merged_head @ layer_params['w_o']
+
+    attention_output = apply_residual_add_and_norm(x, attention_sublayer_output, layer_params['attn_gamma'], layer_params['attn_beta'])
+    
+    # 2. FFN Sublayer 
+    layer_1 = attention_output @ layer_params['w1'] + layer_params['b1']
+    relu = F.relu(layer_1)
+    layer_2 = relu @ layer_params['w2'] + layer_params['b2']
+    ffn_output = apply_residual_add_and_norm(attention_output, layer_2, layer_params['ffn_gamma'], layer_params['ffn_beta'])
+    
+    return ffn_output
 
 # Step 42 - stack_encoder_layers (not yet solved)
 # TODO: implement
