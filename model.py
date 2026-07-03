@@ -461,8 +461,39 @@ def apply_dropout_with_keep_mask(x, keep_mask, keep_prob):
     # TODO: multiply x by the boolean keep_mask and rescale by 1/keep_prob.
     return (x * keep_mask) / keep_prob
 
-# Step 39 - encoder_layer_self_attention_sublayer (not yet solved)
-# TODO: implement
+# Step 39 - encoder_layer_self_attention_sublayer
+def encoder_layer_self_attention_sublayer(x, w_q, w_k, w_v, w_o, gamma, beta, num_heads, src_mask):
+    # TODO: run multi-head self-attention on x and wrap with residual add-and-norm.
+    
+    batch_size, seq_len, d_model = x.size()
+    d_n = d_model // num_heads
+
+    # Project X to q, k, v
+    query_proj = x @ w_q.t()
+    key_proj = x @ w_k.t()
+    val_proj = x @ w_v.t()
+
+    # Split into Heads 
+    q = query_proj.reshape(batch_size, seq_len, num_heads, d_n).transpose(1,2)
+    k = key_proj.reshape(batch_size, seq_len, num_heads, d_n).transpose(1,2)
+    v = val_proj.reshape(batch_size, seq_len, num_heads, d_n).transpose(1,2)
+
+    # Compute Scaled Attention Product
+    attention_raw = (q @ k.transpose(-2, -1)) / math.sqrt(d_n)
+    if src_mask is not None:
+        attention_raw = attention_raw.masked_fill(src_mask == False, -float('inf'))
+    
+    weights = torch.softmax(attention_raw, dim=-1)
+    scaled_dot_product = weights @ v
+
+    # Merge Heads back to Model dim
+    merged_head = scaled_dot_product.transpose(1,2)
+    merged_head = scaled_dot_product.reshape(batch_size, seq_len, d_model)
+    
+    sublayer_output = merged_head @ w_o.t()
+
+    # Apply Residual and 
+    return apply_residual_add_and_norm(x, sublayer_output, gamma, beta)
 
 # Step 40 - encoder_layer_feed_forward_sublayer (not yet solved)
 # TODO: implement
