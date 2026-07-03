@@ -500,8 +500,22 @@ def encoder_layer_self_attention_sublayer(x, w_q, w_k, w_v, w_o, gamma, beta, nu
 
     return gamma * x_normalized + beta
 
-# Step 40 - encoder_layer_feed_forward_sublayer (not yet solved)
-# TODO: implement
+# Step 40 - encoder_layer_feed_forward_sublayer
+def encoder_layer_feed_forward_sublayer(x, w1, b1, w2, b2, gamma, beta):
+    # TODO: run the position-wise FFN on x and wrap it with residual add-and-norm.
+
+    # 1. FFN
+    layer_1 = x @ w1 + b1 
+    relu = F.relu(layer_1)
+    layer_2 = relu @ w2 + b2
+    
+    # 2. Residual 
+    out_layer = x + layer_2
+    mean = out_layer.mean(dim=-1, keepdim=True) 
+    var = out_layer.var(dim=-1, keepdim=True, unbiased=False)
+    out_layer_norm = (out_layer - mean) / torch.sqrt(var + 1e-5)
+
+    return gamma * out_layer_norm + beta
 
 # Step 41 - assemble_encoder_layer (not yet solved)
 # TODO: implement
