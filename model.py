@@ -707,8 +707,64 @@ def apply_log_softmax_over_vocab(logits):
 
     return torch.log_softmax(logits, dim=-1)
 
-# Step 51 - run_transformer_forward (not yet solved)
-# TODO: implement
+# Step 51 - run_transformer_forward
+def run_transformer_forward(src_ids, tgt_ids, model_params, num_heads, pad_id):
+    # TODO: embed src+tgt, add PE, build masks, run encoder/decoder, project to log probs.
+
+    batch_size, seq_len = tgt_ids.size() 
+
+    # 1. Embed Src + Tgt
+    token_weights = model_params['token_embedding']
+    _, d_model = token_weights.size()
+
+    src_embeddings = token_weights[src_ids] * math.sqrt(d_model)
+    tgt_embeddings = token_weights[tgt_ids] * math.sqrt(d_model)
+
+    src_seq_len = src_ids.size(1)
+    tgt_seq_len = tgt_ids.size(1)
+    max_seq_len = max(src_seq_len, tgt_seq_len)
+
+    # 2. Add Positional Encoding
+    _, d_model = model_params['token_embedding'].size()
+    pe = torch.zeros(max_seq_len, d_model, device=src_ids.device) 
+    position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)
+    # exp(2i * -log(10000)/d_model)
+    div_term = torch.exp(torch.arange(0, d_model, 2).float() * -math.log(10000.0) / d_model)
+
+    pe[:, 0::2] = torch.sin(position * div_term)
+    pe[:, 1::2] = torch.cos(position * div_term)
+
+    src_embeddings = src_embeddings + pe[:src_seq_len, :]
+    tgt_embeddings = tgt_embeddings + pe[:tgt_seq_len, :]
+
+    # 3. Masks
+    # (batch, seq_len) --> (batch, 1, 1, seq_len)
+    src_mask = (src_ids != pad_id).unsqueeze(1).unsqueeze(2)
+    # (seq_len, seq_len) --> (1, 1, seq_len, seq_len) --> (batch, 1, seq_len, seq_len)
+    tgt_padding_mask = (tgt_ids != pad_id).unsqueeze(1).unsqueeze(2)
+    tgt_causal_mask = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool)).unsqueeze(0).unsqueeze(1)
+    tgt_mask = tgt_padding_mask & tgt_causal_mask
+
+    # 4. Run Encoder 
+    enc_output = src_embeddings
+    encoder_layers = model_params['encoder_layers']
+    for encoder_layer in encoder_layers:
+        enc = assemble_encoder_layer(enc_output, encoder_layer, num_heads, src_mask)
+        enc_output = enc
+    
+    # 5. Run Decoder
+    dec_output = tgt_embeddings
+    decoder_layers = model_params['decoder_layers']
+    for decoder_layer in decoder_layers:
+        dec = assemble_decoder_layer(dec_output, enc_output, decoder_layer, num_heads, src_mask, tgt_mask)
+        dec_output = dec
+
+    # 6. Project to Vocabulary Logits
+    proj_weight = model_params['output_projection'] 
+    logits = dec_output @ proj_weight.t()
+
+    # 7. Log Probabilities
+    return torch.log_softmax(logits, dim=-1)
 
 # Step 52 - init_encoder_layer_parameters (not yet solved)
 # TODO: implement
