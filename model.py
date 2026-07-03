@@ -620,8 +620,58 @@ def decoder_layer_feed_forward_sublayer(y, w1, b1, w2, b2, gamma, beta):
     layer_2 = relu @ w2 + b2 
     return apply_residual_add_and_norm(y, layer_2, gamma, beta)
 
-# Step 46 - assemble_decoder_layer (not yet solved)
-# TODO: implement
+# Step 46 - assemble_decoder_layer
+import torch
+
+def assemble_decoder_layer(y, encoder_output, layer_params, num_heads, src_mask, tgt_mask):
+    """
+    Run a full decoder layer: masked self-attention, cross-attention, then FFN.
+    """
+    
+    # 1. Masked Self-Attention
+    # The decoder looks at itself (y) to find context, using the target mask 
+    # to hide future words from being seen.
+    masked_attn_out = decoder_layer_masked_self_attention_sublayer(
+        y, 
+        layer_params['w_q_self'], 
+        layer_params['w_k_self'], 
+        layer_params['w_v_self'], 
+        layer_params['w_o_self'],
+        layer_params['self_gamma'], 
+        layer_params['self_beta'], 
+        num_heads, 
+        tgt_mask
+    ) 
+
+    # 2. Cross-Attention
+    # The decoder takes its own context (masked_attn_out) as the Query, and looks 
+    # at the encoder_output for the Keys and Values using the source mask.
+    cross_attn_out = decoder_layer_cross_attention_sublayer(
+        masked_attn_out, 
+        encoder_output, 
+        layer_params['w_q_cross'], 
+        layer_params['w_k_cross'], 
+        layer_params['w_v_cross'], 
+        layer_params['w_o_cross'],
+        layer_params['cross_gamma'], 
+        layer_params['cross_beta'], 
+        num_heads, 
+        src_mask
+    ) 
+
+    # 3. Feed-Forward Network
+    # Finally, the context is processed through the FFN.
+    ffn_out = decoder_layer_feed_forward_sublayer(
+        cross_attn_out, 
+        layer_params['w1'], 
+        layer_params['b1'], 
+        layer_params['w2'], 
+        layer_params['b2'], 
+        layer_params['ffn_gamma'], 
+        layer_params['ffn_beta']
+    )
+    
+    return ffn_out
 
 # Step 47 - stack_decoder_layers (not yet solved)
 # TODO: implement
