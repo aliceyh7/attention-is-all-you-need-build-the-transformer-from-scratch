@@ -492,8 +492,13 @@ def encoder_layer_self_attention_sublayer(x, w_q, w_k, w_v, w_o, gamma, beta, nu
     
     sublayer_output = merged_head @ w_o.t()
 
-    # Apply Residual and 
-    return apply_residual_add_and_norm(x, sublayer_output, gamma, beta)
+    # Apply Residual 
+    x = x + sublayer_output
+    mean = x.mean(dim=-1, keepdim=True)
+    var = x.var(dim=-1, keepdim=True, unbiased=False)
+    x_normalized = (x - mean) / torch.sqrt(1e-5 + var)
+
+    return gamma * x_normalized + beta
 
 # Step 40 - encoder_layer_feed_forward_sublayer (not yet solved)
 # TODO: implement
