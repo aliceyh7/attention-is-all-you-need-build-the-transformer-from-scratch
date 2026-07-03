@@ -583,8 +583,31 @@ def decoder_layer_masked_self_attention_sublayer(y, w_q, w_k, w_v, w_o, gamma, b
 
     return apply_residual_add_and_norm(y, sublayer_output, gamma, beta)
 
-# Step 44 - decoder_layer_cross_attention_sublayer (not yet solved)
-# TODO: implement
+# Step 44 - decoder_layer_cross_attention_sublayer
+import torch
+
+def decoder_layer_cross_attention_sublayer(y, encoder_output, w_q, w_k, w_v, w_o, gamma, beta, num_heads, src_mask):
+    # TODO: run multi-head cross-attention (Q from y, K/V from encoder_output) and wrap with add-and-norm
+    
+    batch_size, tgt_seq_len, d_model = y.size()
+    _, src_seq_len, _ = encoder_output.size()
+    d_n = d_model // num_heads 
+
+    query = (y @ w_q.t()).reshape(batch_size, tgt_seq_len, num_heads, d_n).transpose(1,2)
+    key = (encoder_output @ w_k.t()).reshape(batch_size, src_seq_len, num_heads, d_n).transpose(1,2)
+    value = (encoder_output @ w_v.t()).reshape(batch_size, src_seq_len, num_heads, d_n).transpose(1,2)
+    
+    raw_attention = (query @ key.transpose(-2, -1)) / math.sqrt(d_n)
+    if src_mask is not None:
+        src_mask = src_mask.unsqueeze(1).unsqueeze(2)
+        raw_attention = raw_attention.masked_fill(src_mask==False, -float('inf'))
+    weights = torch.softmax(raw_attention, dim=-1)
+    context = weights @ value
+
+    merged_heads = context.transpose(1,2).reshape(batch_size, tgt_seq_len, d_model)
+    sublayer_output = merged_heads @ w_o.t()
+
+    return apply_residual_add_and_norm(y, sublayer_output, gamma, beta)
 
 # Step 45 - decoder_layer_feed_forward_sublayer (not yet solved)
 # TODO: implement
