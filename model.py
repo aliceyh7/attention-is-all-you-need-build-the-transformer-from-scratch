@@ -766,8 +766,48 @@ def run_transformer_forward(src_ids, tgt_ids, model_params, num_heads, pad_id):
     # 7. Log Probabilities
     return torch.log_softmax(logits, dim=-1)
 
-# Step 52 - init_encoder_layer_parameters (not yet solved)
-# TODO: implement
+# Step 52 - init_encoder_layer_parameters
+import torch
+import math
+
+def init_encoder_layer_parameters(d_model, num_heads, d_ff):
+    """Return a dict of leaf tensors with requires_grad=True for one encoder layer."""
+    # TODO: allocate w_q, w_k, w_v, w_o, w1, b1, w2, b2, attn_gamma, attn_beta, ffn_gamma, ffn_beta.
+    
+    # 1. Allocation Attention Weight Matrices
+    # Data (batch, seq, d_model) @ Weights (d_model, d_model) = Output (batch, seq, d_model)
+
+    # 2. Allocation FFN internal matrices
+    # Expands d_model to d_ff then shrinks down
+
+    # 3. Layer Norm Initializes
+
+    def make_weights(*shape):
+        tensor = torch.randn(*shape, dtype=torch.float32) * 0.02
+        tensor.requires_grad=True
+        return tensor
+           
+    def make_bias(*shape, init_val=0.0):
+        tensor = torch.full(shape, init_val, dtype=torch.float32)
+        tensor.requires_grad=True
+        return tensor
+    
+    return {
+        'w_q' : make_weights(d_model, d_model),
+        'w_k' : make_weights(d_model, d_model),
+        'w_v' : make_weights(d_model, d_model),
+        'w_o' : make_weights(d_model, d_model),
+
+        'w1' : make_weights(d_model, d_ff),
+        'b1' : make_bias(d_ff, init_val=0.0),
+        'w2' : make_weights(d_ff, d_model),
+        'b2' : make_bias(d_model, init_val=0.0),
+
+        'attn_gamma' : make_bias(d_model, init_val=1.0),
+        'attn_beta':  make_bias(d_model, init_val=0.0),
+        'ffn_gamma':  make_bias(d_model, init_val=1.0),
+        'ffn_beta':   make_bias(d_model, init_val=0.0)
+    }
 
 # Step 53 - init_decoder_layer_parameters (not yet solved)
 # TODO: implement
