@@ -557,8 +557,31 @@ def stack_encoder_layers(x, encoder_layer_params_list, num_heads, src_mask):
         x = encoder
     return x
 
-# Step 43 - decoder_layer_masked_self_attention_sublayer (not yet solved)
-# TODO: implement
+# Step 43 - decoder_layer_masked_self_attention_sublayer
+import torch
+
+def decoder_layer_masked_self_attention_sublayer(y, w_q, w_k, w_v, w_o, gamma, beta, num_heads, tgt_mask):
+    # TODO: run masked multi-head self-attention on y and wrap with residual add-and-norm.
+
+    batch_size, seq_len, d_model = y.size()
+    d_n = d_model // num_heads 
+
+    q = (y @ w_q.t()).reshape(batch_size, seq_len, num_heads, d_n).transpose(1,2)
+    k = (y @ w_k.t()).reshape(batch_size, seq_len, num_heads, d_n).transpose(1,2)
+    v = (y @ w_v.t()).reshape(batch_size, seq_len, num_heads, d_n).transpose(1,2)
+
+    raw_attention = q @ k.transpose(-2, -1) / math.sqrt(d_n)
+    if tgt_mask is not None:
+        raw_attention = raw_attention.masked_fill(tgt_mask == False, -float('inf'))
+
+    weights = torch.softmax(raw_attention, dim=-1)
+    context = weights @ v 
+
+    merged_heads = context.transpose(1,2).reshape(batch_size, seq_len, d_model)
+
+    sublayer_output = merged_heads @ w_o.t()
+
+    return apply_residual_add_and_norm(y, sublayer_output, gamma, beta)
 
 # Step 44 - decoder_layer_cross_attention_sublayer (not yet solved)
 # TODO: implement
