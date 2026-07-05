@@ -1186,11 +1186,54 @@ def _expand_attn_mask(mask, batch_size):
         return mask[:, None, :, :]
     return mask                             # already 4D
 
-# Step 72 - run_training_step_with_backprop (not yet solved)
-# TODO: implement
+# Step 72 - run_training_step_with_backprop
+import torch
 
-# Step 73 - run_training_loop_for_steps (not yet solved)
-# TODO: implement
+def run_training_step_with_backprop(src_batch, tgt_batch, parameter_list, model_params, optimizer_state, step_number, config):
+    """Run one training iteration: zero grads, forward, backward, Noam LR, Adam step.
+
+    Returns the scalar loss value for the step as a Python float.
+    """
+    # TODO: zero grads, compute loss, backward, look up Noam LR, apply Adam step
+    
+    # 1. Clear old gradients
+    zero_all_parameter_gradients(parameter_list)
+
+    # 2. Forward pass -> scalar loss
+    loss = compute_batch_training_loss(src_batch, tgt_batch, model_params, config)
+
+    # 3. Backward pass -> populate .grad on every parameter
+    loss.backward()
+
+    # 4. Noam learning-rate schedule for this step
+    learning_rate = compute_noam_learning_rate(step_number, config['d_model'], config['warmup_steps'])
+
+    # 5. Adam update (increments optimizer_state['t'] internally)
+    apply_adam_step_to_all_parameters(parameter_list, optimizer_state, learning_rate)
+
+    return float(loss.item())
+
+# Step 73 - run_training_loop_for_steps
+def run_training_loop_for_steps(batches, parameter_list, model_params, optimizer_state, num_steps, config):
+    """Run num_steps training iterations, cycling through batches, and return per-step losses."""
+    
+
+    # 1. Clear old gradients
+    zero_all_parameter_gradients(parameter_list)
+
+    # 2. Forward pass -> scalar loss
+    loss = compute_batch_training_loss(src_batch, tgt_batch, model_params, config)
+
+    # 3. Backward pass -> populate .grad on every parameter
+    loss.backward()
+
+    # 4. Noam learning-rate schedule for this step
+    learning_rate = compute_noam_learning_rate(step_number, config['d_model'], config['warmup_steps'])
+
+    # 5. Adam update (increments optimizer_state['t'] internally)
+    apply_adam_step_to_all_parameters(parameter_list, optimizer_state, learning_rate)
+
+    return float(loss.item())
 
 # Step 74 - pick_next_token_by_argmax (not yet solved)
 # TODO: implement
