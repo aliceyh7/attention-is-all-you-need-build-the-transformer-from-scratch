@@ -589,27 +589,42 @@ def decoder_layer_masked_self_attention_sublayer(y, w_q, w_k, w_v, w_o, gamma, b
     return apply_residual_add_and_norm(y, sublayer_output, gamma, beta)
 
 # Step 44 - decoder_layer_cross_attention_sublayer
+import math
 import torch
 
-def decoder_layer_cross_attention_sublayer(y, encoder_output, w_q, w_k, w_v, w_o, gamma, beta, num_heads, src_mask):
-    # TODO: run multi-head cross-attention (Q from y, K/V from encoder_output) and wrap with add-and-norm
-    
+def _expand_attn_mask(mask, batch_size):
+    """Normalize a boolean attention mask to shape (B or 1, 1 or H, T_q, T_k)."""
+    if mask.dim() == 2:
+        if mask.size(0) == batch_size:      # (B, S) padding mask
+            return mask[:, None, None, :]   # -> (B, 1, 1, S)
+        else:                               # (T, T) causal mask
+            return mask[None, None, :, :]   # -> (1, 1, T, T)
+    elif mask.dim() == 3:                   # (B, T_q, T_k)
+        return mask[:, None, :, :]          # -> (B, 1, T_q, T_k)
+    return mask                             # already 4D: (B, 1/H, T_q, T_k)
+
+
+def decoder_layer_cross_attention_sublayer(y, encoder_output, w_q, w_k, w_v, w_o,
+                                           gamma, beta, num_heads, src_mask):
     batch_size, tgt_seq_len, d_model = y.size()
     _, src_seq_len, _ = encoder_output.size()
-    d_n = d_model // num_heads 
+    d_n = d_model // num_heads
 
-    query = (y @ w_q.t()).reshape(batch_size, tgt_seq_len, num_heads, d_n).transpose(1,2)
-    key = (encoder_output @ w_k.t()).reshape(batch_size, src_seq_len, num_heads, d_n).transpose(1,2)
-    value = (encoder_output @ w_v.t()).reshape(batch_size, src_seq_len, num_heads, d_n).transpose(1,2)
-    
-    raw_attention = (query @ key.transpose(-2, -1)) / math.sqrt(d_n)
+    # Q from decoder input, K/V from encoder output
+    query = (y @ w_q.t()).reshape(batch_size, tgt_seq_len, num_heads, d_n).transpose(1, 2)
+    key   = (encoder_output @ w_k.t()).reshape(batch_size, src_seq_len, num_heads, d_n).transpose(1, 2)
+    value = (encoder_output @ w_v.t()).reshape(batch_size, src_seq_len, num_heads, d_n).transpose(1, 2)
+
+    raw_attention = (query @ key.transpose(-2, -1)) / math.sqrt(d_n)  # (B, H, T, S)
+
     if src_mask is not None:
-        mask = src_mask[:, None, None, :]  # (B, 1, 1, S)
-        raw_attention = raw_attention.masked_fill(mask == False, -float('inf'))
-    weights = torch.softmax(raw_attention, dim=-1)
-    context = weights @ value
+        mask = _expand_attn_mask(src_mask, batch_size)
+        raw_attention = raw_attention.masked_fill(~mask, -float('inf'))
 
-    merged_heads = context.transpose(1,2).reshape(batch_size, tgt_seq_len, d_model)
+    weights = torch.softmax(raw_attention, dim=-1)
+    context = weights @ value                                          # (B, H, T, d_n)
+
+    merged_heads = context.transpose(1, 2).reshape(batch_size, tgt_seq_len, d_model)
     sublayer_output = merged_heads @ w_o.t()
 
     return apply_residual_add_and_norm(y, sublayer_output, gamma, beta)
