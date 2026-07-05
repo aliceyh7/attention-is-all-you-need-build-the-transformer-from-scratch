@@ -559,29 +559,104 @@ def stack_encoder_layers(x, encoder_layer_params_list, num_heads, src_mask):
 
 # Step 43 - decoder_layer_masked_self_attention_sublayer
 import torch
+import torch.nn.functional as F 
+import math
 
-def decoder_layer_masked_self_attention_sublayer(y, w_q, w_k, w_v, w_o, gamma, beta, num_heads, tgt_mask):
-    # TODO: run masked multi-head self-attention on y and wrap with residual add-and-norm.
+def compute_batch_training_loss(src_batch, tgt_batch, model_params, config):
+    # 1. Build Decoder 
+    gold_targets = tgt_batch.clone()
+    pad_id = config['pad_id']
+    start_token_id = config['start_id']
+    vocab_size = config['vocab_size']
+    epsilon = config['smoothing']
+    num_heads = config['num_heads']
 
-    batch_size, seq_len, d_model = y.size()
-    d_n = d_model // num_heads 
+    start_col = tgt_batch.new_full((tgt_batch.size(0), 1), start_token_id)
+    tgt_batch = torch.cat([start_col, tgt_batch[:, :-1]], dim=1)
 
-    q = (y @ w_q.t()).reshape(batch_size, seq_len, num_heads, d_n).transpose(1,2)
-    k = (y @ w_k.t()).reshape(batch_size, seq_len, num_heads, d_n).transpose(1,2)
-    v = (y @ w_v.t()).reshape(batch_size, seq_len, num_heads, d_n).transpose(1,2)
+    # 2. run transformer forward pass
+    # a. embed src and tgt
+    src_weights = model_params['src_embedding']
+    tgt_weights = model_params['tgt_embedding']
+    _, d_model = src_weights.size()
+    device = src_weights.device
 
-    raw_attention = q @ k.transpose(-2, -1) / math.sqrt(d_n)
-    if tgt_mask is not None:
-        raw_attention = raw_attention.masked_fill(tgt_mask == False, -float('inf'))
+    src_embeddings = src_weights[src_batch] * math.sqrt(d_model)
+    tgt_embeddings = tgt_weights[tgt_batch] * math.sqrt(d_model)
 
-    weights = torch.softmax(raw_attention, dim=-1)
-    context = weights @ v 
+    src_seq_len = src_batch.size(1)
+    tgt_seq_len = tgt_batch.size(1)
+    max_seq_len = max(src_seq_len, tgt_seq_len)
 
-    merged_heads = context.transpose(1,2).reshape(batch_size, seq_len, d_model)
+    # b. add positional encodings
+    pe = torch.zeros(max_seq_len, d_model, device=device)
+    position = torch.arange(0, max_seq_len, dtype=torch.float, device=device).unsqueeze(1)
+    div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float, device=device) * -math.log(10000.0) / d_model)
+    pe[:, 0::2] = torch.sin(position * div_term)
+    pe[:, 1::2] = torch.cos(position * div_term)
+    
+    src_embeddings = src_embeddings + pe[:src_seq_len, :]
+    tgt_embeddings = tgt_embeddings + pe[:tgt_seq_len, :]
 
-    sublayer_output = merged_heads @ w_o.t()
+    # c. masks (Expanded explicitly to avoid strict broadcasting failures)
+    src_key_mask = (src_batch != pad_id).unsqueeze(1).unsqueeze(2) # (B, 1, 1, S_s)
+    
+    # Encoder self-attention mask
+    src_mask = src_key_mask.expand(-1, -1, src_seq_len, -1)
+    # Decoder cross-attention mask
+    src_mask_for_decoder = src_key_mask.expand(-1, -1, tgt_seq_len, -1)
+    
+    # Decoder self-attention mask
+    tgt_key_mask = (tgt_batch != pad_id).unsqueeze(1).unsqueeze(2)
+    tgt_causal_mask = torch.tril(torch.ones(tgt_seq_len, tgt_seq_len, dtype=torch.bool, device=device)).unsqueeze(0).unsqueeze(1)
+    tgt_mask = (tgt_key_mask & tgt_causal_mask).expand(-1, -1, tgt_seq_len, -1)
+     
+    # d. run encoder
+    enc_output = src_embeddings
+    for encoder_layer in model_params['encoder_layers']:
+        enc_output = assemble_encoder_layer(enc_output, encoder_layer, num_heads, src_mask)
 
-    return apply_residual_add_and_norm(y, sublayer_output, gamma, beta)
+    # e. run decoder
+    dec_output = tgt_embeddings
+    for decoder_layer in model_params['decoder_layers']:
+        dec_output = assemble_decoder_layer(dec_output, enc_output, decoder_layer, num_heads, src_mask_for_decoder, tgt_mask)
+
+    # f. project to vocabulary logits
+    proj_weight = model_params['output_projection']
+    logits = dec_output @ proj_weight.t() 
+
+    # g. log probabilities
+    probabilities = torch.log_softmax(logits, dim=-1) 
+
+    # 3. build smoothed targets 
+    # Create entirely detached from probabilities graph to pass strict autograd assertions
+    smoothed_targets = torch.full(
+        probabilities.shape, 
+        epsilon / (vocab_size - 2), 
+        device=device, 
+        dtype=torch.float
+    )
+    
+    smoothed_targets.scatter_(dim=-1, index=gold_targets.unsqueeze(-1), value=1.0 - epsilon)
+    
+    # Zero out the column for pad_id
+    smoothed_targets[:, :, pad_id] = 0.0
+    
+    # Zero out the rows completely where gold target is pad_id
+    pad_mask = (gold_targets == pad_id).unsqueeze(-1)
+    smoothed_targets.masked_fill_(pad_mask, 0.0)
+
+    # 4. average the KL loss over non-pad tokens 
+    kl_loss = F.kl_div(probabilities, smoothed_targets, reduction='none')
+    per_token_loss = kl_loss.sum(dim=-1)
+
+    # Guarantee padded tokens contribute exactly 0 to the sum
+    non_pad_mask = (gold_targets != pad_id)
+    per_token_loss = per_token_loss.masked_fill(~non_pad_mask, 0.0)
+    
+    loss = per_token_loss.sum() / non_pad_mask.sum()
+
+    return loss
 
 # Step 44 - decoder_layer_cross_attention_sublayer
 import torch
@@ -599,8 +674,8 @@ def decoder_layer_cross_attention_sublayer(y, encoder_output, w_q, w_k, w_v, w_o
     
     raw_attention = (query @ key.transpose(-2, -1)) / math.sqrt(d_n)
     if src_mask is not None:
-        src_mask = src_mask.unsqueeze(1).unsqueeze(2)
-        raw_attention = raw_attention.masked_fill(src_mask==False, -float('inf'))
+        mask = src_mask[:, None, None, :]  # (B, 1, 1, S)
+        raw_attention = raw_attention.masked_fill(mask == False, -float('inf'))
     weights = torch.softmax(raw_attention, dim=-1)
     context = weights @ value
 
@@ -1028,25 +1103,26 @@ import torch
 def apply_adam_step_to_all_parameters(parameter_list, optimizer_state, learning_rate, beta1=0.9, beta2=0.98, epsilon=1e-9):
     # TODO: increment t, then for each param with a grad update m, v, bias-correct, and subtract delta in place.
     
-    optimizer_state['t'] += 1
-    t = optimizer_state['t']
+    # 1. Increment t
+    optimizer_state['t'] += 1 
+    t = optimizer_state['t'] 
 
+    # 2. For each param with a grad, update
     for i, parameter in enumerate(parameter_list):
         if parameter.grad is None:
-            continue 
+            continue
         
-        grad = parameter.grad
-        optimizer_state['m'][i] = beta1 * optimizer_state['m'][i] + (1 - beta1) * grad
+        grad = parameter.grad 
+        optimizer_state['m'][i] = beta1 * optimizer_state['m'][i] + (1 - beta1) * grad 
         optimizer_state['v'][i] = beta2 * optimizer_state['v'][i] + (1 - beta2) * grad * grad
-        
+
         m_hat = optimizer_state['m'][i] / (1 - beta1 ** t)
         v_hat = optimizer_state['v'][i] / (1 - beta2 ** t)
 
-        # apply 
         with torch.no_grad():
             parameter -= learning_rate * m_hat / (torch.sqrt(v_hat) + epsilon)
-        
-        return optimizer_state
+    
+    return optimizer_state
 
 # Step 70 - zero_all_parameter_gradients
 import torch
@@ -1057,8 +1133,106 @@ def zero_all_parameter_gradients(parameter_list):
     for parameter in parameter_list: 
         parameter.grad = None
 
-# Step 71 - compute_batch_training_loss (not yet solved)
-# TODO: implement
+# Step 71 - compute_batch_training_loss
+import torch
+import torch.nn.functional as F 
+import math
+
+def compute_batch_training_loss(src_batch, tgt_batch, model_params, config):
+    # 1. Build Decoder 
+    gold_targets = tgt_batch.clone()
+    pad_id = config['pad_id']
+    start_token_id = config['start_id']
+    vocab_size = config['vocab_size']
+    epsilon = config['smoothing']
+    num_heads = config['num_heads']
+
+    start_col = tgt_batch.new_full((tgt_batch.size(0), 1), start_token_id)
+    tgt_batch = torch.cat([start_col, tgt_batch[:, :-1]], dim=1)
+
+    # 2. run transformer forward pass
+    # a. embed src and tgt
+    src_weights = model_params['src_embedding']
+    tgt_weights = model_params['tgt_embedding']
+    _, d_model = src_weights.size()
+    device = src_weights.device
+
+    src_embeddings = src_weights[src_batch] * math.sqrt(d_model)
+    tgt_embeddings = tgt_weights[tgt_batch] * math.sqrt(d_model)
+
+    src_seq_len = src_batch.size(1)
+    tgt_seq_len = tgt_batch.size(1)
+    max_seq_len = max(src_seq_len, tgt_seq_len)
+
+    # b. add positional encodings
+    pe = torch.zeros(max_seq_len, d_model, device=device)
+    position = torch.arange(0, max_seq_len, dtype=torch.float, device=device).unsqueeze(1)
+    div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float, device=device) * -math.log(10000.0) / d_model)
+    pe[:, 0::2] = torch.sin(position * div_term)
+    pe[:, 1::2] = torch.cos(position * div_term)
+    
+    src_embeddings = src_embeddings + pe[:src_seq_len, :]
+    tgt_embeddings = tgt_embeddings + pe[:tgt_seq_len, :]
+
+    # c. masks (Expanded explicitly to avoid strict broadcasting failures)
+    src_key_mask = (src_batch != pad_id).unsqueeze(1).unsqueeze(2) # (B, 1, 1, S_s)
+    
+    # Encoder self-attention mask
+    src_mask = src_key_mask.expand(-1, -1, src_seq_len, -1)
+    # Decoder cross-attention mask
+    src_mask_for_decoder = src_key_mask.expand(-1, -1, tgt_seq_len, -1)
+    
+    # Decoder self-attention mask
+    tgt_key_mask = (tgt_batch != pad_id).unsqueeze(1).unsqueeze(2)
+    tgt_causal_mask = torch.tril(torch.ones(tgt_seq_len, tgt_seq_len, dtype=torch.bool, device=device)).unsqueeze(0).unsqueeze(1)
+    tgt_mask = (tgt_key_mask & tgt_causal_mask).expand(-1, -1, tgt_seq_len, -1)
+     
+    # d. run encoder
+    enc_output = src_embeddings
+    for encoder_layer in model_params['encoder_layers']:
+        enc_output = assemble_encoder_layer(enc_output, encoder_layer, num_heads, src_mask)
+
+    # e. run decoder
+    dec_output = tgt_embeddings
+    for decoder_layer in model_params['decoder_layers']:
+        dec_output = assemble_decoder_layer(dec_output, enc_output, decoder_layer, num_heads, src_mask_for_decoder, tgt_mask)
+
+    # f. project to vocabulary logits
+    proj_weight = model_params['output_projection']
+    logits = dec_output @ proj_weight.t() 
+
+    # g. log probabilities
+    probabilities = torch.log_softmax(logits, dim=-1) 
+
+    # 3. build smoothed targets 
+    # Create entirely detached from probabilities graph to pass strict autograd assertions
+    smoothed_targets = torch.full(
+        probabilities.shape, 
+        epsilon / (vocab_size - 2), 
+        device=device, 
+        dtype=torch.float
+    )
+    
+    smoothed_targets.scatter_(dim=-1, index=gold_targets.unsqueeze(-1), value=1.0 - epsilon)
+    
+    # Zero out the column for pad_id
+    smoothed_targets[:, :, pad_id] = 0.0
+    
+    # Zero out the rows completely where gold target is pad_id
+    pad_mask = (gold_targets == pad_id).unsqueeze(-1)
+    smoothed_targets.masked_fill_(pad_mask, 0.0)
+
+    # 4. average the KL loss over non-pad tokens 
+    kl_loss = F.kl_div(probabilities, smoothed_targets, reduction='none')
+    per_token_loss = kl_loss.sum(dim=-1)
+
+    # Guarantee padded tokens contribute exactly 0 to the sum
+    non_pad_mask = (gold_targets != pad_id)
+    per_token_loss = per_token_loss.masked_fill(~non_pad_mask, 0.0)
+    
+    loss = per_token_loss.sum() / non_pad_mask.sum()
+
+    return loss
 
 # Step 72 - run_training_step_with_backprop (not yet solved)
 # TODO: implement
