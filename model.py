@@ -867,24 +867,22 @@ def init_decoder_layer_parameters(d_model, num_heads, d_ff):
     }
 
 # Step 54 - init_embedding_and_projection_parameters
-import torch
-
 def init_embedding_and_projection_parameters(vocab_size, d_model, tie_weights=True):
     """Allocate src/tgt embeddings and output projection (optionally tied)."""
-    # TODO: allocate three (vocab_size, d_model) tensors with requires_grad=True
 
     def make_embedding(*shape):
         tensor = torch.randn(shape, dtype=torch.float32)
         tensor.requires_grad = True
         return tensor
-    
+
     src_embedding = make_embedding(vocab_size, d_model)
     tgt_embedding = make_embedding(vocab_size, d_model)
 
     return {
+        'token_embedding': src_embedding,   # alias — same tensor, same .grad
         'src_embedding': src_embedding,
         'tgt_embedding': tgt_embedding,
-        'output_projection' : tgt_embedding if tie_weights else make_embedding(vocab_size, d_model)
+        'output_projection': tgt_embedding if tie_weights else make_embedding(vocab_size, d_model),
     }
 
 # Step 55 - collect_model_parameters_into_list
@@ -1166,7 +1164,7 @@ def compute_batch_training_loss(src_batch, tgt_batch, model_params, config):
     smoothed_targets.masked_fill_(pad_mask, 0.0)
 
     # 4. average the KL loss over non-pad tokens 
-    kl_loss = F.kl_div(probabilities, smoothed_targets)
+    kl_loss = F.kl_div(probabilities, smoothed_targets, reduction='none')
     per_token_loss = kl_loss.sum(dim=-1)
 
     # Guarantee padded tokens contribute exactly 0 to the sum
