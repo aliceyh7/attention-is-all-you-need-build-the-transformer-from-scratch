@@ -1093,8 +1093,9 @@ def compute_batch_training_loss(src_batch, tgt_batch, model_params, config):
 
     # 2. run transformer forward pass
     # a. embed src and tgt
-    src_weights = model_params['src_embedding']
-    tgt_weights = model_params['tgt_embedding']
+    emb = model_params.get('embeddings', model_params)
+    src_weights = emb['src_embedding'] if 'src_embedding' in emb else model_params['token_embedding']
+    tgt_weights = emb['tgt_embedding'] if 'tgt_embedding' in emb else src_weights
     _, d_model = src_weights.size()
     device = src_weights.device
 
