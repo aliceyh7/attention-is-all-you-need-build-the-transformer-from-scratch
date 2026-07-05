@@ -519,34 +519,30 @@ def encoder_layer_feed_forward_sublayer(x, w1, b1, w2, b2, gamma, beta):
 
 # Step 41 - assemble_encoder_layer
 def assemble_encoder_layer(x, layer_params, num_heads, src_mask):
-    # TODO: chain the self-attention sublayer and the feed-forward sublayer using layer_params.
-    
     b, l, d_model = x.size()
-    # 1. Self-Attention Sublayer
     d_n = d_model // num_heads
-    query = (x @ layer_params['w_q'].t()).reshape(b, l, num_heads, d_n).transpose(1,2)
-    key = (x @ layer_params['w_k'].t()).reshape(b, l, num_heads, d_n).transpose(1,2)
-    value = (x @ layer_params['w_v'].t()).reshape(b, l, num_heads, d_n).transpose(1,2)
 
-    raw_attention = query @ key.transpose(-2, -1)
+    query = (x @ layer_params['w_q'].t()).reshape(b, l, num_heads, d_n).transpose(1, 2)
+    key   = (x @ layer_params['w_k'].t()).reshape(b, l, num_heads, d_n).transpose(1, 2)
+    value = (x @ layer_params['w_v'].t()).reshape(b, l, num_heads, d_n).transpose(1, 2)
+
+    raw_attention = (query @ key.transpose(-2, -1)) / math.sqrt(d_n)   # fix 2: was missing scaling
     if src_mask is not None:
         raw_attention = raw_attention.masked_fill(src_mask == False, -float('inf'))
-    value = (x @ layer_params['w_v'].t()).reshape(b, l, num_heads, d_n).transpose(1,2)
     weights = torch.softmax(raw_attention, dim=-1)
-    context = raw_attention @ value
+    context = weights @ value                                          # fix 1: was raw_attention @ value
 
     merged_head = context.transpose(1, 2).reshape(b, l, d_model)
-    attention_sublayer_output = merged_head @ layer_params['w_o']
+    attention_sublayer_output = merged_head @ layer_params['w_o'].t()  # fix 3: was missing .t()
 
-    attention_output = apply_residual_add_and_norm(x, attention_sublayer_output, layer_params['attn_gamma'], layer_params['attn_beta'])
-    
-    # 2. FFN Sublayer 
+    attention_output = apply_residual_add_and_norm(
+        x, attention_sublayer_output, layer_params['attn_gamma'], layer_params['attn_beta'])
+
     layer_1 = attention_output @ layer_params['w1'] + layer_params['b1']
     relu = F.relu(layer_1)
     layer_2 = relu @ layer_params['w2'] + layer_params['b2']
-    ffn_output = apply_residual_add_and_norm(attention_output, layer_2, layer_params['ffn_gamma'], layer_params['ffn_beta'])
-    
-    return ffn_output
+    return apply_residual_add_and_norm(
+        attention_output, layer_2, layer_params['ffn_gamma'], layer_params['ffn_beta'])
 
 # Step 42 - stack_encoder_layers
 # def assemble_encoder_layer(x, layer_params, num_heads, src_mask): 
@@ -592,16 +588,18 @@ def decoder_layer_masked_self_attention_sublayer(y, w_q, w_k, w_v, w_o, gamma, b
 import math
 import torch
 
-def _expand_attn_mask(mask, batch_size):
-    """Normalize a boolean attention mask to shape (B or 1, 1 or H, T_q, T_k)."""
+def _expand_attn_mask(mask, batch_size, key_len):
+    """Normalize a boolean attention mask to (B or 1, 1 or H, T_q, T_k)."""
     if mask.dim() == 2:
-        if mask.size(0) == batch_size:      # (B, S) padding mask
-            return mask[:, None, None, :]   # -> (B, 1, 1, S)
-        else:                               # (T, T) causal mask
-            return mask[None, None, :, :]   # -> (1, 1, T, T)
-    elif mask.dim() == 3:                   # (B, T_q, T_k)
-        return mask[:, None, :, :]          # -> (B, 1, T_q, T_k)
-    return mask                             # already 4D: (B, 1/H, T_q, T_k)
+        if mask.size(0) == batch_size and mask.size(1) == key_len and mask.size(0) != mask.size(1):
+            return mask[:, None, None, :]        # (B, S) padding mask
+        elif mask.size(0) == mask.size(1) == key_len:
+            return mask[None, None, :, :]        # (T, T) causal mask
+        else:
+            return mask[:, None, None, :]        # fall back to padding interpretation
+    elif mask.dim() == 3:
+        return mask[:, None, :, :]               # (B, T_q, T_k)
+    return mask                                  # already 4D                          # already 4D: (B, 1/H, T_q, T_k)
 
 
 def decoder_layer_cross_attention_sublayer(y, encoder_output, w_q, w_k, w_v, w_o,
@@ -1168,7 +1166,7 @@ def compute_batch_training_loss(src_batch, tgt_batch, model_params, config):
     smoothed_targets.masked_fill_(pad_mask, 0.0)
 
     # 4. average the KL loss over non-pad tokens 
-    kl_loss = F.kl_div(probabilities, smoothed_targets, reduction='none')
+    kl_loss = F.kl_div(probabilities, smoothed_targets)
     per_token_loss = kl_loss.sum(dim=-1)
 
     # Guarantee padded tokens contribute exactly 0 to the sum
@@ -1178,6 +1176,17 @@ def compute_batch_training_loss(src_batch, tgt_batch, model_params, config):
     loss = per_token_loss.sum() / non_pad_mask.sum()
 
     return loss
+
+def _expand_attn_mask(mask, batch_size):
+    """Normalize a boolean attention mask to (B or 1, 1 or H, T_q, T_k)."""
+    if mask.dim() == 2:
+        if mask.size(0) == batch_size:      # (B, S) padding mask
+            return mask[:, None, None, :]
+        else:                               # (T, T) causal mask
+            return mask[None, None, :, :]
+    elif mask.dim() == 3:                   # (B, T_q, T_k)
+        return mask[:, None, :, :]
+    return mask                             # already 4D
 
 # Step 72 - run_training_step_with_backprop (not yet solved)
 # TODO: implement
